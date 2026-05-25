@@ -385,6 +385,52 @@
       color: var(--muted);
     }
 
+    .result-answers {
+      display: grid;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .result-answer {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 10px;
+      align-items: start;
+      border: 1px solid var(--border);
+      background: var(--card);
+      border-radius: 12px;
+      padding: 10px;
+      color: var(--muted);
+    }
+
+    .result-answer.selected {
+      border-color: var(--primary);
+      color: var(--text);
+    }
+
+    .result-answer.correct {
+      border-color: var(--ok);
+      background: color-mix(in srgb, var(--ok) 14%, var(--card));
+      color: var(--text);
+    }
+
+    .result-answer.wrong {
+      border-color: var(--bad);
+      background: color-mix(in srgb, var(--bad) 14%, var(--card));
+      color: var(--text);
+    }
+
+    .result-badge {
+      font-size: 12px;
+      font-weight: 800;
+      color: var(--muted);
+    }
+
+    .result-answer.correct .result-badge,
+    .result-answer.wrong .result-badge {
+      color: var(--text);
+    }
+
     @media (max-width: 760px) {
       .topbar {
         align-items: flex-start;
@@ -510,6 +556,7 @@
     let stats = { done: 0, wrong: 0 };
     let test = null;
     let timerId = null;
+    let timerTimeoutId = null;
 
     const el = {
       body: document.body,
@@ -729,15 +776,34 @@
 
     function startTimer() {
       stopTimer();
+      updateStats();
+
       timerId = setInterval(() => {
+        if (!test || test.finished) {
+          stopTimer();
+          return;
+        }
+
         updateStats();
-        if (getTestSecondsLeft() <= 0) showTestResults();
+
+        if (getTestSecondsLeft() <= 0) {
+          finishTestByTime();
+        }
       }, 1000);
+
+      timerTimeoutId = setTimeout(finishTestByTime, TEST_SECONDS * 1000);
     }
 
     function stopTimer() {
       if (timerId) clearInterval(timerId);
+      if (timerTimeoutId) clearTimeout(timerTimeoutId);
       timerId = null;
+      timerTimeoutId = null;
+    }
+
+    function finishTestByTime() {
+      if (!test || test.finished) return;
+      showTestResults(true);
     }
 
     function showDone() {
@@ -851,6 +917,10 @@
     function checkAnswer() {
       if (!current) return;
       if (mode === 'test') {
+        if (getTestSecondsLeft() <= 0) {
+          finishTestByTime();
+          return;
+        }
         saveTestAnswer();
         goNextTestQuestion();
         return;
@@ -895,6 +965,10 @@
     function skipQuestion() {
       if (!current || checked) return;
       if (mode === 'test') {
+        if (getTestSecondsLeft() <= 0) {
+          finishTestByTime();
+          return;
+        }
         saveTestAnswer();
         goNextTestQuestion();
         return;
@@ -922,7 +996,7 @@
       updateStats();
     }
 
-    function showTestResults() {
+    function showTestResults(endedByTime = false) {
       if (!test || test.finished) return;
       saveTestAnswer();
       stopTimer();
@@ -943,6 +1017,7 @@
       el.doneScreen.classList.remove('hidden');
       el.doneScreen.innerHTML = `
         <h2>Wynik testu: ${percent}%</h2>
+        <p>${endedByTime ? 'Czas minął. Test został zakończony automatycznie.' : 'Test zakończony.'}</p>
         <p>${correctCount} / ${results.length} poprawnych odpowiedzi.</p>
         <button class="btn primary" id="restartBtn" type="button">Nowy test</button>
         <button class="btn secondary" id="backToLearningBtn" type="button">Wróć do nauki</button>
@@ -957,13 +1032,51 @@
     }
 
     function renderResultItem(result, index) {
-      const given = result.given.size ? [...result.given].join(', ').toUpperCase() : 'brak odpowiedzi';
-      const correct = [...result.correct].join(', ').toUpperCase();
+      const givenAnswers = result.question.answers.filter(answer => result.given.has(answer.label));
+      const correctAnswers = result.question.answers.filter(answer => result.correct.has(answer.label));
+
+      const givenText = givenAnswers.length
+        ? givenAnswers.map(formatAnswerText).join(' | ')
+        : 'Nie zaznaczono odpowiedzi.';
+
+      const correctText = correctAnswers.map(formatAnswerText).join(' | ');
+
       return `
         <div class="result-item ${result.ok ? 'ok' : 'bad'}">
           <p class="result-question">${index + 1}. ${escapeHtml(result.question.question)}</p>
-          <p class="result-line">Twój wybór: ${escapeHtml(given)}</p>
-          <p class="result-line">Poprawnie: ${escapeHtml(correct)}</p>
+          <p class="result-line">Twój wybór: ${escapeHtml(givenText)}</p>
+          <p class="result-line">Poprawnie: ${escapeHtml(correctText)}</p>
+          <div class="result-answers">
+            ${result.question.answers.map(answer => renderResultAnswer(answer, result)).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    function formatAnswerText(answer) {
+      return `${answer.label.toUpperCase()}. ${answer.text}`;
+    }
+
+    function renderResultAnswer(answer, result) {
+      const isSelected = result.given.has(answer.label);
+      const isCorrect = result.correct.has(answer.label);
+      const classes = ['result-answer'];
+
+      if (isCorrect) classes.push('correct');
+      if (isSelected && !isCorrect) classes.push('wrong');
+      if (isSelected) classes.push('selected');
+
+      const badges = [];
+      if (isSelected) badges.push('zaznaczona');
+      if (isCorrect) badges.push('poprawna');
+
+      return `
+        <div class="${classes.join(' ')}">
+          <span class="label">${escapeHtml(answer.label)}</span>
+          <span>
+            ${escapeHtml(answer.text)}
+            ${badges.length ? `<div class="result-badge">${escapeHtml(badges.join(' • '))}</div>` : ''}
+          </span>
         </div>
       `;
     }
